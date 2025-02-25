@@ -1,0 +1,27 @@
+data:
+  train_batch_size: 64
+  val_batch_size: 128
+  num_workers: 4
+  pin_memory: true
+  train_subset_fraction: 1.0  # Use full training data by default
+  val_subset_fraction: 1.0    # Use full validation data by default
+
+model:
+  name: "resnet18"  # Model architecture
+  in_channels: 3    # RGB input by default
+  num_classes: 1000 # ImageNet classes by default
+
+training:
+  num_rounds: 10
+  epochs_per_round: 5
+  eval_per_epoch: 1
+  learning_rate: 0.001
+  momentum: 0.9
+  weight_decay: 0.0001
+  device: "cuda"  # will fall back to CPU if CUDA not available
+  alpha: 1.0  # weight for consistency loss
+
+paths:
+  model_path: "experiment/YOUR_EXPERIMENT/models/base_model.pth"
+  data_dir: "experiment/YOUR_EXPERIMENT/data"
+  log_dir: "experiment/YOUR_EXPERIMENT/logs" 
