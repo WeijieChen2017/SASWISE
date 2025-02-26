@@ -35,8 +35,8 @@ def prepare_dataset(experiment_name):
     # Load CIFAR10 dataset with verification disabled
     dataset = load_dataset(
         "cifar10",
-        verification_mode='no_verify',
-        trust_remote_code=True
+        trust_remote_code=True,
+        verify_ssl=False  # Use verify_ssl=False instead of verification_mode
     )
     # Save dataset to experiment folder
     dataset.save_to_disk(os.path.join(experiment_name, "data"))
