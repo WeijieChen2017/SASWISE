@@ -1,0 +1,46 @@
+# Training configuration for CIFAR10 ResNet with diversification
+experiment_name: CIFAR10_ResNet
+model_type: resnet50
+dataset: cifar10
+
+# Paths
+paths:
+  model_path: CIFAR10_ResNet/models/base_model.pth
+  log_dir: CIFAR10_ResNet/logs
+  data_dir: CIFAR10_ResNet/data
+
+# Training parameters
+training:
+  # Number of rounds to perform (each round draws two new menus)
+  # This is equivalent to n_draw in the diversification process
+  num_rounds: 100
+  
+  # Number of epochs to train each menu configuration within a round
+  # This is equivalent to epochs_per_draw in the diversification process
+  epochs_per_round: 10
+  
+  # Weight of consistency loss relative to accuracy loss
+  # Higher values prioritize consistency between different menu configurations
+  # This is equivalent to alpha_consistency_to_accuracy
+  alpha: 0.3
+  
+  # Other training parameters
+  learning_rate: 0.001
+  momentum: 0.9
+  weight_decay: 0.0001
+  eval_per_epoch: 1
+  device: cuda
+
+# Data parameters
+data:
+  train_batch_size: 64
+  val_batch_size: 64
+  num_workers: 4
+  pin_memory: true
+  train_subset_fraction: 1.0
+  val_subset_fraction: 1.0
+
+# Model parameters
+model:
+  in_channels: 3  # RGB for CIFAR-10
+  num_classes: 10  # CIFAR-10 has 10 classes 
