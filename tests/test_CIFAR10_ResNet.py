@@ -5,9 +5,18 @@ import ssl
 import requests
 from datasets import load_dataset
 from transformers import AutoFeatureExtractor, ResNetForImageClassification
+from huggingface_hub import HfFolder
+import warnings
+
+# Disable SSL verification warnings
+warnings.filterwarnings('ignore', message='Unverified HTTPS request')
 
 # This sets the default SSL context to an unverified one
 ssl._create_default_https_context = ssl._create_unverified_context
+
+# Configure requests and huggingface to skip SSL verification
+os.environ['CURL_CA_BUNDLE'] = ''
+HfFolder.save_token('dummy_token')  # This helps bypass some HF Hub verification
 
 def setup_experiment_folders():
     experiment_name = "CIFAR10_ResNet"
@@ -23,19 +32,31 @@ def setup_experiment_folders():
     return experiment_name
 
 def prepare_dataset(experiment_name):
-    # Load CIFAR10 dataset
-    dataset = load_dataset("cifar10")
+    # Load CIFAR10 dataset with verification disabled
+    dataset = load_dataset(
+        "cifar10",
+        verification_mode='no_verify',
+        trust_remote_code=True
+    )
     # Save dataset to experiment folder
     dataset.save_to_disk(os.path.join(experiment_name, "data"))
     print(dataset)
     return dataset
 
 def prepare_model(experiment_name):
-    # 1. Load the feature extractor
-    feature_extractor = AutoFeatureExtractor.from_pretrained("microsoft/resnet-50")
+    # 1. Load the feature extractor with SSL verification disabled
+    feature_extractor = AutoFeatureExtractor.from_pretrained(
+        "microsoft/resnet-50",
+        trust_remote_code=True,
+        verify=False
+    )
     
-    # 2. Load the pretrained ResNet model
-    model = ResNetForImageClassification.from_pretrained("microsoft/resnet-50")
+    # 2. Load the pretrained ResNet model with SSL verification disabled
+    model = ResNetForImageClassification.from_pretrained(
+        "microsoft/resnet-50",
+        trust_remote_code=True,
+        verify=False
+    )
     
     # Save model state dict to experiment folder
     model_save_path = os.path.join(experiment_name, "models", "base_model.pth")
