@@ -3,20 +3,17 @@ import os
 import torch
 import ssl
 import requests
-from datasets import load_dataset
 from transformers import AutoFeatureExtractor, ResNetForImageClassification
-from huggingface_hub import HfFolder
 import warnings
+from torchvision.datasets import CIFAR10
+import torchvision.transforms as transforms
+from datasets import Dataset, DatasetDict
 
 # Disable SSL verification warnings
 warnings.filterwarnings('ignore', message='Unverified HTTPS request')
 
 # This sets the default SSL context to an unverified one
 ssl._create_default_https_context = ssl._create_unverified_context
-
-# Configure requests and huggingface to skip SSL verification
-os.environ['CURL_CA_BUNDLE'] = ''
-HfFolder.save_token('dummy_token')  # This helps bypass some HF Hub verification
 
 def setup_experiment_folders():
     experiment_name = "CIFAR10_ResNet"
@@ -32,12 +29,33 @@ def setup_experiment_folders():
     return experiment_name
 
 def prepare_dataset(experiment_name):
-    # Load CIFAR10 dataset with verification disabled
-    dataset = load_dataset(
-        "cifar10",
-        trust_remote_code=True,
-        verify_ssl=False  # Use verify_ssl=False instead of verification_mode
-    )
+    print("Downloading CIFAR-10 dataset using torchvision...")
+    
+    # Define transformations
+    transform = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+    ])
+    
+    # Download CIFAR10 using torchvision
+    train_dataset = CIFAR10(root=os.path.join(experiment_name, "data", "raw"), 
+                           train=True, download=True, transform=transform)
+    test_dataset = CIFAR10(root=os.path.join(experiment_name, "data", "raw"), 
+                          train=False, download=True, transform=transform)
+    
+    # Convert torchvision datasets to HuggingFace datasets format for consistency
+    def convert_to_hf_dataset(torch_dataset):
+        data = {"image": [], "label": []}
+        for img, label in torch_dataset:
+            data["image"].append(img.numpy())
+            data["label"].append(label)
+        return Dataset.from_dict(data)
+    
+    dataset = DatasetDict({
+        "train": convert_to_hf_dataset(train_dataset),
+        "test": convert_to_hf_dataset(test_dataset)
+    })
+    
     # Save dataset to experiment folder
     dataset.save_to_disk(os.path.join(experiment_name, "data"))
     print(dataset)
