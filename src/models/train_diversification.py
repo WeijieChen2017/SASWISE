@@ -19,6 +19,7 @@ import importlib
 # Add the project root to the path so we can import modules properly
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from src.models.cook_model import cook_model
+from src.utils.training_logger import TrainingLogger
 
 
 def load_config(config_path):
@@ -84,8 +85,14 @@ def create_model(config, device, menu, model_num):
     model_module = importlib.import_module(config['model']['model_module'])
     model_class = getattr(model_module, config['model']['model_class'])
     
-    # Create model instance
-    model = model_class(**config['model'].get('model_args', {}))
+    # Create model instance with default parameters
+    model_args = config['model'].get('model_args', {}).copy()
+    if 'num_classes' in model_args:
+        num_classes = model_args.pop('num_classes')  # Save and remove num_classes
+    else:
+        num_classes = 10  # Default to 10 classes (e.g., for CIFAR-10)
+    
+    model = model_class(**model_args)
     
     # Load cooked model state dict
     model_path = config['paths']['model_path']
@@ -95,8 +102,22 @@ def create_model(config, device, menu, model_num):
     cook_model(model_path, menu, output_path)
     state_dict = torch.load(output_path, map_location=device)
     
-    # Load the state dict
+    # Load the state dict with the original architecture
     model.load_state_dict(state_dict, strict=False)
+    
+    # Modify the final layer based on model type
+    if hasattr(model, 'fc'):  # ResNet, DenseNet, etc.
+        in_features = model.fc.in_features
+        model.fc = nn.Linear(in_features, num_classes)
+    elif hasattr(model, 'classifier') and isinstance(model.classifier, nn.Linear):  # Some models
+        in_features = model.classifier.in_features
+        model.classifier = nn.Linear(in_features, num_classes)
+    elif hasattr(model, 'classifier') and isinstance(model.classifier, nn.Sequential):  # VGG, etc.
+        if isinstance(model.classifier[-1], nn.Linear):
+            in_features = model.classifier[-1].in_features
+            model.classifier[-1] = nn.Linear(in_features, num_classes)
+    else:
+        print(f"Warning: Could not automatically modify final layer for {model_class.__name__}")
     
     return model.to(device)
 
@@ -284,6 +305,9 @@ def main():
     log_dir = Path(config['paths']['log_dir'])
     log_dir.mkdir(parents=True, exist_ok=True)
     
+    # Initialize logger
+    logger = TrainingLogger(log_dir)
+    
     # Load data
     train_loader, val_loader = load_data(config)
     print("Data loaded successfully")
@@ -295,7 +319,6 @@ def main():
     
     # Training loop
     print("\nStarting training...")
-    log_file = log_dir / "training_log.json"
     
     # Initialize menu history
     menu_history = []
@@ -344,37 +367,38 @@ def main():
                 config['training']['alpha']
             )
             
-            # Evaluate periodically
-            if epoch % config['training']['eval_per_epoch'] == 0:
-                val_loss, val_acc = validate(model1, val_loader, criterion, device)
-                print(f"Epoch {epoch} - Train Acc Loss: {train_acc_loss:.4f}, "
-                      f"Cons Loss: {train_cons_loss:.4f}, Accuracy: {train_acc:.2f}%")
-                print(f"Validation - Loss: {val_loss:.4f}, Accuracy: {val_acc:.2f}%")
-                
-                # Log results with menu similarity
-                log_entry = {
-                    'timestamp': datetime.now().strftime("%Y%m%d_%H%M%S"),
-                    'round': round_idx,
-                    'menu1': menu1,
-                    'menu2': menu2,
-                    'menu_similarity': similarity,
-                    'epochs': epoch,
-                    'train_accuracy_loss': train_acc_loss,
-                    'train_consistency_loss': train_cons_loss,
-                    'train_accuracy': train_acc,
-                    'val_loss': val_loss,
-                    'val_accuracy': val_acc
-                }
-                with open(log_file, 'a') as f:
-                    json.dump(log_entry, f)
-                    f.write('\n')
+            # Evaluate
+            val_loss, val_acc = validate(model1, val_loader, criterion, device)
+            
+            # Log results
+            print(f"Epoch {epoch} - Train Acc Loss: {train_acc_loss:.4f}, "
+                  f"Cons Loss: {train_cons_loss:.4f}, Accuracy: {train_acc:.2f}%")
+            print(f"Validation - Loss: {val_loss:.4f}, Accuracy: {val_acc:.2f}%")
+            
+            # Log to our new logger
+            logger.log_epoch(
+                round_idx=round_idx,
+                epoch=epoch,
+                menu1=menu1,
+                menu2=menu2,
+                menu_similarity=similarity,
+                train_acc_loss=train_acc_loss,
+                train_cons_loss=train_cons_loss,
+                train_acc=train_acc,
+                val_loss=val_loss,
+                val_acc=val_acc
+            )
         
         # Update serving weights and history
         update_serving_weights(model1, menu1, serving_info, device)
         update_serving_history(serving_info, menu1, config['training']['epochs_per_round'], log_dir)
         print(f"Updated weights and history for menu 1 servings")
+        
+        # End round in logger (generates plots)
+        logger.end_round(round_idx)
+        print(f"Round {round_idx} completed. Metrics logged and plots generated.")
     
-    print("\nTraining completed. Check serving_training_history.json for serving usage details.")
+    print("\nTraining completed. Check the logs directory for detailed metrics and visualizations.")
 
 
 if __name__ == "__main__":
