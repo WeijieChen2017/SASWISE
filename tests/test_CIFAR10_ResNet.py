@@ -1,12 +1,11 @@
-# Run pip install datasets transformers already
+# Run pip install torchvision
 import os
 import torch
 import ssl
-import requests
-from transformers import AutoFeatureExtractor, ResNetForImageClassification
 import warnings
 from torchvision.datasets import CIFAR10
 import torchvision.transforms as transforms
+from torchvision.models import resnet50
 from datasets import Dataset, DatasetDict
 
 # Disable SSL verification warnings
@@ -62,33 +61,32 @@ def prepare_dataset(experiment_name):
     return dataset
 
 def prepare_model(experiment_name):
-    # 1. Load the feature extractor with SSL verification disabled
-    feature_extractor = AutoFeatureExtractor.from_pretrained(
-        "microsoft/resnet-50",
-        trust_remote_code=True,
-        verify=False
-    )
+    print("Loading ResNet-50 model from torchvision...")
     
-    # 2. Load the pretrained ResNet model with SSL verification disabled
-    model = ResNetForImageClassification.from_pretrained(
-        "microsoft/resnet-50",
-        trust_remote_code=True,
-        verify=False
-    )
+    # Load pretrained ResNet-50 model from torchvision
+    model = resnet50(pretrained=True)
     
     # Save model state dict to experiment folder
     model_save_path = os.path.join(experiment_name, "models", "base_model.pth")
     model_state_dict = model.state_dict()
     torch.save(model_state_dict, model_save_path)
     print(f"Saved model state dict to {model_save_path}")
+    
+    # Create a simple feature extractor function
+    def feature_extractor(images):
+        # Convert images to the format expected by the model
+        if not isinstance(images, torch.Tensor):
+            images = torch.stack([torch.tensor(img) for img in images])
+        return images
+    
     return model, feature_extractor
 
 def print_next_steps():
     """Print the commands that need to be run next"""
     commands = [
-        "python -m src.models.kitchen_setup.generate_hierarchy --state_dict_path experiment/CIFAR10_ResNet/models/base_model.pth --out experiment/CIFAR10_ResNet/models/hierarchy.json",
-        "python -m src.models.kitchen_setup.analyze_course_parameters --hierarchy_path experiment/CIFAR10_ResNet/models/hierarchy.json --course_dict experiment/CIFAR10_ResNet/models/course_dict.json --output_file experiment/CIFAR10_ResNet/models/course_analysis.json",
-        "python -m src.models.kitchen_setup.generate_serving --hierarchy_path experiment/CIFAR10_ResNet/models/hierarchy.json --output_file experiment/CIFAR10_ResNet/servings/serving_info.json"
+        "python -m src.models.kitchen_setup.generate_hierarchy --state_dict_path CIFAR10_ResNet/models/base_model.pth --out CIFAR10_ResNet/models/hierarchy.json",
+        "python -m src.models.kitchen_setup.analyze_course_parameters --hierarchy_path CIFAR10_ResNet/models/hierarchy.json --course_dict CIFAR10_ResNet/models/course_dict.json --output_file CIFAR10_ResNet/models/course_analysis.json",
+        "python -m src.models.kitchen_setup.generate_serving --hierarchy_path CIFAR10_ResNet/models/hierarchy.json --output_file CIFAR10_ResNet/servings/serving_info.json"
     ]
     
     print("\nNext steps - run these commands in order:")
