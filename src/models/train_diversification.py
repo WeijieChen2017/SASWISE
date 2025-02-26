@@ -14,6 +14,7 @@ from datetime import datetime
 from collections import defaultdict
 import random
 import numpy as np
+import argparse
 
 
 def load_config(config_path):
@@ -320,8 +321,14 @@ def update_serving_history(serving_info, menu, epochs, log_dir):
 
 
 def main():
-    # Load configuration
-    config = load_config('experiment/MNIST/train_config.yaml')
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description='Train model with diversification')
+    parser.add_argument('--config', type=str, required=True, 
+                        help='Path to the configuration YAML file')
+    args = parser.parse_args()
+    
+    # Load configuration from the provided path
+    config = load_config(args.config)
     
     # Set up device
     device = get_device(config)
