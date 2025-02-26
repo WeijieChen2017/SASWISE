@@ -1,8 +1,13 @@
 # Run pip install datasets transformers already
 import os
 import torch
+import ssl
+import requests
 from datasets import load_dataset
 from transformers import AutoFeatureExtractor, ResNetForImageClassification
+
+# This sets the default SSL context to an unverified one
+ssl._create_default_https_context = ssl._create_unverified_context
 
 def setup_experiment_folders():
     experiment_name = "CIFAR10_ResNet"
