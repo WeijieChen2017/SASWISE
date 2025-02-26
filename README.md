@@ -97,136 +97,73 @@ This example demonstrates how to use SASWISE with a pretrained ResNet model for 
 ### 1. Install Required Packages
 
 ```bash
-pip install torch torchvision
-pip install git+https://github.com/huyvnphan/PyTorch_CIFAR10.git
+pip install torch torchvision datasets
 ```
 
-### 2. Download and Set Up the Pretrained Model
+### 2. Run the CIFAR-10 ResNet Test Script
 
-```python
-import torch
-import os
-from pathlib import Path
-from cifar10_models import resnet
+We provide a test script that automates the setup process:
 
-# Create experiment directories
-experiment_dir = Path("experiment/CIFAR10")
-models_dir = experiment_dir / "models"
-servings_dir = experiment_dir / "servings"
-os.makedirs(models_dir, exist_ok=True)
-os.makedirs(servings_dir, exist_ok=True)
-
-# Load pretrained ResNet18 for CIFAR-10
-model = resnet.resnet18(pretrained=True)
-
-# Save the base model
-torch.save(model.state_dict(), models_dir / "resnet18_cifar10_base.pth")
+```bash
+python tests/test_CIFAR10_ResNet.py
 ```
 
-### 3. Set Up the Kitchen (Decompose the Model)
+This script will:
+- Create the experiment folder structure for CIFAR10_ResNet
+- Download the CIFAR-10 dataset using torchvision
+- Load a pretrained ResNet-50 model from torchvision
+- Save the model state dict to the experiment folder
+- Print the next steps to run
 
-```python
-from src.models.kitchen_setup import setup_kitchen
+### 3. Run the Kitchen Setup Commands
 
-# Analyze model and create hierarchy
-model_hierarchy = setup_kitchen.analyze_model(model, "resnet18_cifar10")
+After running the test script, you'll need to execute the following commands in order:
 
-# Define courses based on model layers
-courses = [
-    {"name": "course_1", "nodes": ["conv1", "bn1", "layer1"]},
-    {"name": "course_2", "nodes": ["layer2"]},
-    {"name": "course_3", "nodes": ["layer3"]},
-    {"name": "course_4", "nodes": ["layer4"]},
-    {"name": "course_5", "nodes": ["fc"]}
-]
+```bash
+# 1. Generate model hierarchy
+python -m src.models.kitchen_setup.generate_hierarchy --state_dict CIFAR10_ResNet/models/base_model.pth --out CIFAR10_ResNet/models/hierarchy
 
-# Create servings for each course
-for i, course in enumerate(courses, 1):
-    setup_kitchen.create_servings(
-        model, 
-        course["nodes"], 
-        servings_dir, 
-        f"course_{i}", 
-        num_servings=4
-    )
+# 2. Analyze course parameters
+# Replace <output from Command 1> with the actual output file from the previous command
+python -m src.models.kitchen_setup.course_analysis --model_hierarchy <output from Command 1> --out CIFAR10_ResNet/models/course_analysis
 
-# Generate serving_info.json
-setup_kitchen.generate_serving_info(
-    experiment_dir / "servings" / "serving_info.json",
-    "CIFAR10",
-    "resnet18",
-    courses
-)
+# 3. Create serving structure
+# Replace <output from Command 2> with the actual output file from the previous command
+python -m src.models.kitchen_setup.create_serving --course_analysis <output from Command 2> --out CIFAR10_ResNet --state_dict CIFAR10_ResNet/models/base_model.pth
 ```
 
-### 4. Cook a Model with a Specific Menu
+### 4. Resulting Directory Structure
 
-```python
-from src.models.cook_model import cook_model
+After completing these steps, you'll have a fully set up experiment with the following structure:
 
-# Define a menu (one serving from each course)
-menu = [1, 2, 3, 2, 1]  # Using serving 1, 2, 3, 2, 1 for courses 1-5
-
-# Cook the model
-cooked_model_path = models_dir / "cooked_model.pth"
-cook_model(
-    str(models_dir / "resnet18_cifar10_base.pth"),
-    menu,
-    str(cooked_model_path)
-)
-
-# Load the cooked model
-model = resnet.resnet18(pretrained=False)
-model.load_state_dict(torch.load(cooked_model_path))
-model.eval()
+```
+CIFAR10_ResNet/
+├── models/
+│   ├── base_model.pth           # The saved ResNet model state dict
+│   ├── hierarchy/               # Model hierarchy information
+│   └── course_analysis/         # Course analysis results
+├── servings/
+│   └── servings/                # Generated servings for each course
+│       ├── course_1/
+│       │   ├── serving_1_state_dict.pt
+│       │   ├── serving_2_state_dict.pt
+│       │   └── ...
+│       ├── course_2/
+│       │   ├── serving_1_state_dict.pt
+│       │   └── ...
+│       └── ...
+├── logs/                        # Directory for training logs
+└── data/                        # CIFAR-10 dataset
 ```
 
-### 5. Use the Cooked Model for Inference
+### 5. Next Steps
 
-```python
-import torchvision.transforms as transforms
-from PIL import Image
+With this setup complete, you can now:
+- Cook models with different serving combinations
+- Train with diversification
+- Evaluate different menu combinations
 
-# Define transforms for CIFAR-10
-transform = transforms.Compose([
-    transforms.ToTensor(),
-    transforms.Normalize(mean=[0.4914, 0.4822, 0.4465], 
-                         std=[0.2471, 0.2435, 0.2616])
-])
-
-# Load and preprocess an image
-img = Image.open('path_to_your_image.jpg')
-img = transform(img).unsqueeze(0)  # Add batch dimension
-
-# Move to appropriate device
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-model = model.to(device)
-img = img.to(device)
-
-# Get predictions
-with torch.no_grad():
-    outputs = model(img)
-    _, predicted = outputs.max(1)
-
-print(f'Predicted class: {predicted.item()}')
-```
-
-### 6. Train with Diversification
-
-```python
-# Create a train_config.yaml file in your experiment directory
-# Then run:
-python src/models/train_diversification.py --config experiment/CIFAR10/train_config.yaml
-```
-
-### 7. Evaluate Different Menu Combinations
-
-```python
-# Test 10 different menu combinations
-python src/models/michelyn_inspector.py --menu_spec 10 --config experiment/CIFAR10/train_config.yaml
-```
-
-This example demonstrates the complete workflow of using SASWISE with a pretrained ResNet model for CIFAR-10, from setting up the kitchen to cooking models with different menus and evaluating their performance.
+See the previous sections for details on these operations.
 
 ## Requirements
 
