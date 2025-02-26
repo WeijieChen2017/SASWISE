@@ -37,43 +37,69 @@ def load_data(config):
     """Load dataset from disk based on config settings."""
     data_dir = config['paths']['data_dir']
     
-    # Load dataset using the method specified in config
-    dataset_module = importlib.import_module(config['data']['dataset_module'])
-    dataset_loader = getattr(dataset_module, config['data']['dataset_loader'])
+    # Check if we should use MONAI for data loading
+    use_monai = config['data'].get('use_monai', False)
     
-    # Load train and validation datasets
-    train_dataset, val_dataset = dataset_loader(data_dir, **config['data'].get('dataset_args', {}))
-    
-    # Create subsets if specified (optional)
-    if 'train_subset_fraction' in config['data'] and config['data']['train_subset_fraction'] < 1.0:
-        train_size = len(train_dataset)
-        val_size = len(val_dataset)
+    if use_monai:
+        # Import MONAI dataset loader
+        from src.data.monai_cifar10_dataset import load_monai_cifar10_dataset, get_monai_dataloaders
         
-        train_subset_size = int(train_size * config['data']['train_subset_fraction'])
-        val_subset_size = int(val_size * config['data'].get('val_subset_fraction', 1.0))
+        # Load datasets with MONAI caching
+        train_dataset, val_dataset = load_monai_cifar10_dataset(
+            data_dir=data_dir,
+            use_augmentation=config['data'].get('dataset_args', {}).get('use_augmentation', True),
+            normalize=config['data'].get('dataset_args', {}).get('normalize', True),
+            cache_rate=config['data'].get('cache_rate', 1.0),
+            num_workers=config['data'].get('num_workers', 4)
+        )
         
-        train_indices = torch.randperm(train_size)[:train_subset_size]
-        val_indices = torch.randperm(val_size)[:val_subset_size]
+        # Create MONAI DataLoaders
+        train_loader, val_loader = get_monai_dataloaders(
+            train_ds=train_dataset,
+            val_ds=val_dataset,
+            train_batch_size=config['data']['train_batch_size'],
+            val_batch_size=config['data']['val_batch_size'],
+            num_workers=config['data']['num_workers'],
+            pin_memory=config['data']['pin_memory']
+        )
+    else:
+        # Use the original dataset loading method
+        dataset_module = importlib.import_module(config['data']['dataset_module'])
+        dataset_loader = getattr(dataset_module, config['data']['dataset_loader'])
         
-        train_dataset = torch.utils.data.Subset(train_dataset, train_indices)
-        val_dataset = torch.utils.data.Subset(val_dataset, val_indices)
-    
-    # Create data loaders
-    train_loader = DataLoader(
-        train_dataset,
-        batch_size=config['data']['train_batch_size'],
-        shuffle=True,
-        num_workers=config['data']['num_workers'],
-        pin_memory=config['data']['pin_memory']
-    )
-    
-    val_loader = DataLoader(
-        val_dataset,
-        batch_size=config['data']['val_batch_size'],
-        shuffle=False,
-        num_workers=config['data']['num_workers'],
-        pin_memory=config['data']['pin_memory']
-    )
+        # Load train and validation datasets
+        train_dataset, val_dataset = dataset_loader(data_dir, **config['data'].get('dataset_args', {}))
+        
+        # Create subsets if specified (optional)
+        if 'train_subset_fraction' in config['data'] and config['data']['train_subset_fraction'] < 1.0:
+            train_size = len(train_dataset)
+            val_size = len(val_dataset)
+            
+            train_subset_size = int(train_size * config['data']['train_subset_fraction'])
+            val_subset_size = int(val_size * config['data'].get('val_subset_fraction', 1.0))
+            
+            train_indices = torch.randperm(train_size)[:train_subset_size]
+            val_indices = torch.randperm(val_size)[:val_subset_size]
+            
+            train_dataset = torch.utils.data.Subset(train_dataset, train_indices)
+            val_dataset = torch.utils.data.Subset(val_dataset, val_indices)
+        
+        # Create data loaders
+        train_loader = DataLoader(
+            train_dataset,
+            batch_size=config['data']['train_batch_size'],
+            shuffle=True,
+            num_workers=config['data']['num_workers'],
+            pin_memory=config['data']['pin_memory']
+        )
+        
+        val_loader = DataLoader(
+            val_dataset,
+            batch_size=config['data']['val_batch_size'],
+            shuffle=False,
+            num_workers=config['data']['num_workers'],
+            pin_memory=config['data']['pin_memory']
+        )
     
     print(f"Using {len(train_dataset)} training samples and {len(val_dataset)} validation samples")
     return train_loader, val_loader
@@ -156,22 +182,25 @@ def train_epoch(model1, model2, train_loader, criterion, optimizer, device, alph
         loss.backward()
         optimizer.step()
         
-        # Statistics
-        running_acc_loss += accuracy_loss.item()
-        running_cons_loss += consistency_loss.item()
+        # Statistics - use batch size for proper scaling
+        batch_size = targets.size(0)
+        running_acc_loss += accuracy_loss.item() * batch_size
+        running_cons_loss += consistency_loss.item() * batch_size
         _, predicted = outputs1.max(1)
-        total += targets.size(0)
+        total += batch_size
         correct += predicted.eq(targets).sum().item()
         
+        # Update progress bar with per-sample losses for better interpretation
         pbar.set_postfix({
             'acc_loss': running_acc_loss/total,
             'cons_loss': running_cons_loss/total,
             'acc': 100.*correct/total
         })
     
-    return (running_acc_loss/len(train_loader), 
-            running_cons_loss/len(train_loader), 
-            100.*correct/total)
+    # Return per-sample losses and accuracy
+    return (running_acc_loss/total,  # Per-sample accuracy loss
+            running_cons_loss/total, # Per-sample consistency loss
+            100.*correct/total)      # Accuracy percentage
 
 
 def validate(model, val_loader, criterion, device):

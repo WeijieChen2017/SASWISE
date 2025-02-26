@@ -11,7 +11,11 @@ paths:
 
 # Data parameters
 data:
-  # Module and function to load the dataset
+  # Use MONAI for faster data loading with GPU caching
+  use_monai: true
+  cache_rate: 1.0  # Cache 100% of the dataset
+  
+  # Keep the original dataset module and loader for fallback
   dataset_module: src.data.cifar10_dataset
   dataset_loader: load_cifar10_dataset
   
@@ -21,12 +25,12 @@ data:
     normalize: true
   
   # DataLoader parameters
-  train_batch_size: 640
-  val_batch_size: 640
+  train_batch_size: 128
+  val_batch_size: 256
   num_workers: 4
   pin_memory: true
-  train_subset_fraction: 1.0  # Use full dataset
-  val_subset_fraction: 1.0    # Use full validation set
+  train_subset_fraction: 1.0
+  val_subset_fraction: 1.0
 
 # Model parameters
 model:
@@ -49,7 +53,7 @@ training:
   alpha: 0.3
   
   # Other training parameters
-  learning_rate: 0.001
+  learning_rate: 0.01
   momentum: 0.9
   weight_decay: 0.0001
   eval_per_epoch: 1
