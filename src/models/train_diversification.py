@@ -4,17 +4,21 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
-from torchvision import datasets, transforms
 from pathlib import Path
 from tqdm import tqdm
 import torch.nn.functional as F
-from torchvision.models import resnet18
 import yaml
 from datetime import datetime
 from collections import defaultdict
 import random
 import numpy as np
 import argparse
+import sys
+import importlib
+
+# Add the project root to the path so we can import modules properly
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+from src.models.cook_model import cook_model
 
 
 def load_config(config_path):
@@ -29,39 +33,29 @@ def get_device(config):
 
 
 def load_data(config):
-    # Define transforms
-    transform = transforms.Compose([
-        transforms.Resize((224, 224)),  # ResNet expects 224x224 images
-        transforms.ToTensor(),
-        transforms.Normalize((0.1307,), (0.3081,))  # MNIST mean and std
-    ])
+    """Load dataset from disk based on config settings."""
+    data_dir = config['paths']['data_dir']
     
-    # Load MNIST datasets
-    train_dataset = datasets.MNIST(
-        config['paths']['data_dir'], 
-        train=True, 
-        download=True,
-        transform=transform
-    )
+    # Load dataset using the method specified in config
+    dataset_module = importlib.import_module(config['data']['dataset_module'])
+    dataset_loader = getattr(dataset_module, config['data']['dataset_loader'])
     
-    val_dataset = datasets.MNIST(
-        config['paths']['data_dir'],
-        train=False,
-        transform=transform
-    )
+    # Load train and validation datasets
+    train_dataset, val_dataset = dataset_loader(data_dir, **config['data'].get('dataset_args', {}))
     
-    # Create subsets of training and validation data
-    train_size = len(train_dataset)
-    val_size = len(val_dataset)
-    
-    train_subset_size = int(train_size * config['data']['train_subset_fraction'])
-    val_subset_size = int(val_size * config['data']['val_subset_fraction'])
-    
-    train_indices = torch.randperm(train_size)[:train_subset_size]
-    val_indices = torch.randperm(val_size)[:val_subset_size]
-    
-    train_dataset = torch.utils.data.Subset(train_dataset, train_indices)
-    val_dataset = torch.utils.data.Subset(val_dataset, val_indices)
+    # Create subsets if specified (optional)
+    if 'train_subset_fraction' in config['data'] and config['data']['train_subset_fraction'] < 1.0:
+        train_size = len(train_dataset)
+        val_size = len(val_dataset)
+        
+        train_subset_size = int(train_size * config['data']['train_subset_fraction'])
+        val_subset_size = int(val_size * config['data'].get('val_subset_fraction', 1.0))
+        
+        train_indices = torch.randperm(train_size)[:train_subset_size]
+        val_indices = torch.randperm(val_size)[:val_subset_size]
+        
+        train_dataset = torch.utils.data.Subset(train_dataset, train_indices)
+        val_dataset = torch.utils.data.Subset(val_dataset, val_indices)
     
     # Create data loaders
     train_loader = DataLoader(
@@ -80,41 +74,28 @@ def load_data(config):
         pin_memory=config['data']['pin_memory']
     )
     
-    print(f"Using {train_subset_size} training samples and {val_subset_size} validation samples")
+    print(f"Using {len(train_dataset)} training samples and {len(val_dataset)} validation samples")
     return train_loader, val_loader
 
 
 def create_model(config, device, menu, model_num):
     """Create a model with specified menu configuration."""
-    # Create ResNet18 model
-    model = resnet18()
+    # Load model architecture using the method specified in config
+    model_module = importlib.import_module(config['model']['model_module'])
+    model_class = getattr(model_module, config['model']['model_class'])
+    
+    # Create model instance
+    model = model_class(**config['model'].get('model_args', {}))
     
     # Load cooked model state dict
-    output_path = f"experiment/MNIST/models/current_meal_model_{model_num}.pth"
-    from cook_model import cook_model
-    cook_model(config['paths']['model_path'], menu, output_path)
+    model_path = config['paths']['model_path']
+    output_path = f"{os.path.dirname(model_path)}/current_meal_model_{model_num}.pth"
+    
+    # Use cook_model to create a model with the specified menu
+    cook_model(model_path, menu, output_path)
     state_dict = torch.load(output_path, map_location=device)
     
-    # Modify first conv layer for grayscale input
-    model.conv1 = nn.Conv2d(
-        config['model']['in_channels'],
-        64,
-        kernel_size=7,
-        stride=2,
-        padding=3,
-        bias=False
-    )
-    
-    # Handle the channel mismatch in conv1.weight
-    if 'conv1.weight' in state_dict:
-        rgb_weights = state_dict['conv1.weight']
-        grayscale_weights = rgb_weights.mean(dim=1, keepdim=True)
-        state_dict['conv1.weight'] = grayscale_weights
-    
-    # Modify final fc layer for MNIST classes
-    model.fc = nn.Linear(512, config['model']['num_classes'])
-    
-    # Load the modified state dict
+    # Load the state dict
     model.load_state_dict(state_dict, strict=False)
     
     return model.to(device)
@@ -192,44 +173,9 @@ def validate(model, val_loader, criterion, device):
     return running_loss/len(val_loader), 100.*correct/total
 
 
-def log_training(log_file, round_idx, menu1, menu2, epochs, train_acc_loss, 
-                train_cons_loss, train_acc, val_loss, val_acc, serving_counts):
-    """Log training results to a file."""
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    log_entry = {
-        'timestamp': timestamp,
-        'round': round_idx,
-        'menu1': menu1,
-        'menu2': menu2,
-        'epochs': epochs,
-        'train_accuracy_loss': train_acc_loss,
-        'train_consistency_loss': train_cons_loss,
-        'train_accuracy': train_acc,
-        'val_loss': val_loss,
-        'val_accuracy': val_acc,
-        'serving_usage': serving_counts
-    }
-    
-    with open(log_file, 'a') as f:
-        json.dump(log_entry, f)
-        f.write('\n')
-
-
 def calculate_menu_similarity(menu1, menu2):
     """Calculate similarity between two menus."""
     return sum(1 for a, b in zip(menu1, menu2) if a == b) / len(menu1)
-
-
-def is_menu_diverse_enough(menu, previous_menus, similarity_threshold=0.6):
-    """Check if a menu is sufficiently different from previous menus."""
-    if not previous_menus:
-        return True
-    
-    for prev_menu in previous_menus:
-        similarity = calculate_menu_similarity(menu, prev_menu)
-        if similarity > similarity_threshold:
-            return False
-    return True
 
 
 def generate_diverse_menu(serving_info, previous_menus=None, max_attempts=100):

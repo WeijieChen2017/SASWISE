@@ -25,6 +25,8 @@ data:
   val_batch_size: 64
   num_workers: 4
   pin_memory: true
+  train_subset_fraction: 1.0  # Use full dataset
+  val_subset_fraction: 1.0    # Use full validation set
 
 # Model parameters
 model:
