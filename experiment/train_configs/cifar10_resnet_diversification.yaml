@@ -31,13 +31,11 @@ data:
 # Model parameters
 model:
   # Module and class for the model
-  model_module: torchvision.models
-  model_class: resnet50
+  model_module: src.models.cifar10_resnet
+  model_class: ResNet50ForCIFAR10
   
   # Model arguments
-  model_args:
-    pretrained: false
-    num_classes: 10
+  model_args: {}  # No additional arguments needed
 
 # Training parameters
 training:
