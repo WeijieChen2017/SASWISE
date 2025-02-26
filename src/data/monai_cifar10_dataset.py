@@ -3,8 +3,8 @@ import numpy as np
 from torchvision import datasets, transforms
 from monai.data import CacheDataset, DataLoader
 from monai.transforms import (
-    Compose, ToTensor, RandFlip, RandRotate, NormalizeIntensity, 
-    RandSpatialCrop, ScaleIntensity, EnsureChannelFirst
+    Compose, RandFlip, RandRotate, NormalizeIntensity, 
+    RandSpatialCrop, ScaleIntensity
 )
 
 def load_monai_cifar10_dataset(data_dir, use_augmentation=True, normalize=True, cache_rate=1.0, num_workers=4):
@@ -25,10 +25,10 @@ def load_monai_cifar10_dataset(data_dir, use_augmentation=True, normalize=True, 
     cifar_train = datasets.CIFAR10(root=data_dir, train=True, download=True)
     cifar_test = datasets.CIFAR10(root=data_dir, train=False, download=True)
     
-    # Convert to numpy arrays
-    train_data = cifar_train.data  # Shape: (50000, 32, 32, 3)
+    # Convert to numpy arrays and ensure channel first format (CIFAR is HWC, we need CHW)
+    train_data = cifar_train.data.transpose(0, 3, 1, 2)  # NHWC -> NCHW
     train_labels = np.array(cifar_train.targets)
-    test_data = cifar_test.data    # Shape: (10000, 32, 32, 3)
+    test_data = cifar_test.data.transpose(0, 3, 1, 2)    # NHWC -> NCHW
     test_labels = np.array(cifar_test.targets)
     
     # Create data dictionaries for MONAI
@@ -46,16 +46,12 @@ def load_monai_cifar10_dataset(data_dir, use_augmentation=True, normalize=True, 
     train_transforms = []
     test_transforms = []
     
-    # Always ensure channel first (MONAI expects this)
-    train_transforms.append(EnsureChannelFirst())
-    test_transforms.append(EnsureChannelFirst())
-    
     # Add augmentation if requested
     if use_augmentation:
         train_transforms.extend([
-            RandFlip(prob=0.5, spatial_axis=1),  # horizontal flip
+            RandFlip(prob=0.5, spatial_axis=2),  # horizontal flip (axis 2 because we're in CHW format)
             RandRotate(range_x=15, prob=0.5, keep_size=True),
-            RandSpatialCrop(roi_size=(32, 32), random_size=False),
+            RandSpatialCrop(roi_size=(3, 32, 32), random_size=False),  # Include channel dim
         ])
     
     # Scale intensities to [0, 1]
@@ -65,10 +61,10 @@ def load_monai_cifar10_dataset(data_dir, use_augmentation=True, normalize=True, 
     # Add normalization if requested
     if normalize:
         train_transforms.append(
-            NormalizeIntensity(subtrahend=[0.4914, 0.4822, 0.4465], divisor=[0.2471, 0.2435, 0.2616])
+            NormalizeIntensity(subtrahend=[0.4914, 0.4822, 0.4465], divisor=[0.2471, 0.2435, 0.2616], channel_wise=True)
         )
         test_transforms.append(
-            NormalizeIntensity(subtrahend=[0.4914, 0.4822, 0.4465], divisor=[0.2471, 0.2435, 0.2616])
+            NormalizeIntensity(subtrahend=[0.4914, 0.4822, 0.4465], divisor=[0.2471, 0.2435, 0.2616], channel_wise=True)
         )
     
     # Create transform compositions
